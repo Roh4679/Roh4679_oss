@@ -1,0 +1,47 @@
+# 야구 분야 용어 예시. 사용법: python code.py data/train_50mb.csv --terms terms/baseball.csv
+pitcher,투수
+batter,타자
+inning,이닝
+top,초
+bottom,말
+bot,말
+ball,볼
+balls,볼
+strike,스트라이크
+strikes,스트라이크
+outs,아웃
+runner,주자
+runners,주자
+base,베이스
+1b,1루
+2b,2루
+3b,3루
+run,득점
+season,시즌
+li,레버리지 지수
+pa,타석
+pitch,투구
+game,경기
+home,홈
+away,원정
+win,승리
+expectancy,기대치
+hand,손
+fastball,직구
+breaking,변화구
+offspeed,오프스피드
+pitchmix,구종 구성
+control,제구
+reverse,역방향
+middle,가운데
+zone,존
+trackman,트랙맨
+tagged,기록된
+rel,릴리스
+spin,회전
+induced,유도
+vert,수직
+horz,수평
+break,무브먼트
+extension,익스텐션
+side,좌우
