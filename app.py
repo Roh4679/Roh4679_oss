@@ -91,7 +91,7 @@ if len(sample) < total:
     st.caption(f'통계는 무작위로 뽑은 {len(sample):,}줄 기준이에요.')
 
 st.subheader('한글 컬럼 사전')
-st.dataframe(pd.DataFrame(table), hide_index=True, width='stretch')
+st.dataframe(pd.DataFrame(table).drop(columns='참고'), hide_index=True, width='stretch')  # 참고는 모르는 단어 찾기에만 씀
 
 unknown = list(dict.fromkeys(w for r in table for w in re.findall(r"'([^']+)' 모름", r['참고'])))
 drafts = st.session_state.setdefault('drafts', {})  # AI가 채운 초안 (확인 전)

@@ -68,4 +68,5 @@ def apply_ai(table, send_samples=True):
         if r['원래 이름'] in ai:
             r['한글 이름'], ai_desc = ai[r['원래 이름']]
             r['확실/추측'] = '추측·AI'
-            r['참고'] = f'AI 설명: {ai_desc}'
+            r['설명'] = f"{ai_desc} ({r['설명']})"  # 웹 표에는 참고 칸이 없어 AI 설명을 설명 칸에 넣음
+            r['참고'] = ''
