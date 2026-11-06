@@ -44,35 +44,85 @@ def merge(cache, todo, text):
             cache[_key(by_col[r['column']])] = [r['name'], r['desc']]
 
 
+TERMS_SYSTEM = (
+    '너는 데이터 컬럼 이름에 쓰인 약어·영어 단어의 뜻을 추측하는 도우미다. '
+    '사용자가 알려 준 데이터 주제와, 단어가 들어간 컬럼 이름·샘플 값을 보고 단어마다 짧은 한글 뜻을 정한다. '
+    "뜻이 여러 개로 갈리면 가능성 높은 순서로 '|'로 나눠 적는다 (예: 목록|레버리지 지수)."
+)
+
+TERMS_SCHEMA = {
+    'type': 'object',
+    'properties': {'terms': {'type': 'array', 'items': {
+        'type': 'object',
+        'properties': {'word': {'type': 'string'}, 'meaning': {'type': 'string'}},
+        'required': ['word', 'meaning'],
+        'additionalProperties': False,
+    }}},
+    'required': ['terms'],
+    'additionalProperties': False,
+}
+
+
+def _ask(system, schema, content):
+    """Claude에게 한 번 묻는다 → (응답 JSON 문자열, None) 또는 (None, 실패 이유)."""
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        return None, '환경변수 ANTHROPIC_API_KEY가 없음'
+    import anthropic
+    try:
+        resp = anthropic.Anthropic().beta.messages.create(
+            model=MODEL,
+            max_tokens=16000,
+            betas=['server-side-fallback-2026-07-01'],
+            fallbacks='default',
+            output_config={'effort': 'low', 'format': {'type': 'json_schema', 'schema': schema}},
+            system=system,
+            messages=[{'role': 'user', 'content': json.dumps(content, ensure_ascii=False)}],
+        )
+        if resp.stop_reason != 'end_turn':
+            return None, f'응답이 끝까지 오지 않음 (stop_reason={resp.stop_reason})'
+        return next(b.text for b in resp.content if b.type == 'text'), None
+    except anthropic.AuthenticationError:
+        return None, 'API 키가 틀림. 환경변수 ANTHROPIC_API_KEY를 확인하세요'
+    except anthropic.RateLimitError:
+        return None, '요청 한도 초과. 잠시 후 다시 시도하세요'
+    except anthropic.APIConnectionError:
+        return None, '인터넷 연결 실패'
+    except anthropic.AnthropicError as e:
+        return None, str(e)
+
+
+def _load():
+    return json.loads(CACHE.read_text('utf-8')) if CACHE.exists() else {}
+
+
+def _save(cache):
+    CACHE.parent.mkdir(exist_ok=True)
+    CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1), 'utf-8')
+
+
 def suggest(cols):
     """cols: [{column, kind, desc, examples}] → {column: (한글 이름, 설명)}. 실패하면 있는 캐시만 돌려준다."""
-    cache = json.loads(CACHE.read_text('utf-8')) if CACHE.exists() else {}
+    cache = _load()
     todo = [c for c in cols if _key(c) not in cache]
-    if todo and not os.environ.get('ANTHROPIC_API_KEY'):
-        print('[LLM] 환경변수 ANTHROPIC_API_KEY가 없어 LLM 없이 계속합니다.', file=sys.stderr)
-    elif todo:
-        import anthropic
-        try:
-            resp = anthropic.Anthropic().beta.messages.create(
-                model=MODEL,
-                max_tokens=16000,
-                betas=['server-side-fallback-2026-07-01'],
-                fallbacks='default',
-                output_config={'effort': 'low', 'format': {'type': 'json_schema', 'schema': SCHEMA}},
-                system=SYSTEM,
-                messages=[{'role': 'user', 'content': json.dumps(todo, ensure_ascii=False)}],
-            )
-            if resp.stop_reason != 'end_turn':
-                raise RuntimeError(f'응답이 끝까지 오지 않음 (stop_reason={resp.stop_reason})')
-            merge(cache, todo, next(b.text for b in resp.content if b.type == 'text'))
-            CACHE.parent.mkdir(exist_ok=True)
-            CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1), 'utf-8')
-        except anthropic.AuthenticationError:
-            print('[LLM] API 키가 없거나 틀림. 환경변수 ANTHROPIC_API_KEY를 설정하세요. LLM 없이 계속합니다.', file=sys.stderr)
-        except anthropic.RateLimitError:
-            print('[LLM] 요청 한도 초과. 잠시 후 다시 시도하세요. LLM 없이 계속합니다.', file=sys.stderr)
-        except anthropic.APIConnectionError:
-            print('[LLM] 인터넷 연결 실패. LLM 없이 계속합니다.', file=sys.stderr)
-        except (anthropic.AnthropicError, RuntimeError) as e:
-            print(f'[LLM] 실패: {e}. LLM 없이 계속합니다.', file=sys.stderr)
+    if todo:
+        text, err = _ask(SYSTEM, SCHEMA, todo)
+        if err:
+            print(f'[LLM] {err}. LLM 없이 계속합니다.', file=sys.stderr)
+        else:
+            merge(cache, todo, text)
+            _save(cache)
     return {c['column']: cache[_key(c)] for c in cols if _key(c) in cache}
+
+
+def suggest_terms(topic, words):
+    """주제 + 모르는 단어들 [{word, columns, examples}] → ({단어: 뜻}, 실패 이유 또는 None)."""
+    cache = _load()
+    key = 'terms:' + _key({'topic': topic, 'words': words})
+    if key not in cache:
+        text, err = _ask(TERMS_SYSTEM, TERMS_SCHEMA, {'topic': topic, 'words': words})
+        if err:
+            return {}, err
+        sent = {w['word'] for w in words}
+        cache[key] = {t['word']: t['meaning'] for t in json.loads(text)['terms'] if t['word'] in sent}
+        _save(cache)
+    return cache[key], None

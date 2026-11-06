@@ -77,6 +77,10 @@ def check():
     llm.merge(cache, todo, '{"columns": [{"column": "st", "name": "주문 상태", "desc": "완료/환불"},'
                            ' {"column": "안보낸열", "name": "x", "desc": "x"}]}')
     assert list(cache.values()) == [['주문 상태', '완료/환불']]
+    old = os.environ.pop('ANTHROPIC_API_KEY', None)
+    assert llm.suggest_terms('테스트', [{'word': 'x', 'columns': ['x'], 'examples': []}])[1]  # 키 없으면 이유를 돌려줌
+    if old:
+        os.environ['ANTHROPIC_API_KEY'] = old
     print('ok')
 
 
