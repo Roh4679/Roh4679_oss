@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 import db
+import llm
 from analyze import apply_ai, dictionary_rows, profile
 from dictionary import TERMS
 
@@ -32,8 +33,8 @@ with st.sidebar:
     st.title('데이터 이해 도우미')
     files = st.file_uploader('CSV 파일 올리기 (여러 개 가능)', type='csv', accept_multiple_files=True)
     menu = st.radio('메뉴', ['컬럼 이해하기', '저장 기록', '관계 파악하기 (준비 중)'])
-    use_llm = st.checkbox('모르는 컬럼은 Claude AI에게 물어보기', value=False,
-                          help='환경변수 ANTHROPIC_API_KEY가 필요해요. 컬럼 이름과 샘플 값 3개가 전송돼요.')
+    use_llm = st.checkbox('모르는 컬럼은 AI에게 물어보기', value=False,
+                          help='Ollama(내 컴퓨터) 또는 Claude API를 써요. 컬럼 이름과 샘플 값 3개를 AI에게 보내요.')
 
 if menu == '저장 기록':
     st.header('저장 기록 (SQLite)')
@@ -74,10 +75,11 @@ TERMS.update(BASE_TERMS, **my_terms)
 table = dictionary_rows(sample.columns, infos)
 
 if use_llm:
-    if not os.environ.get('ANTHROPIC_API_KEY'):
-        st.warning('ANTHROPIC_API_KEY가 없어 AI 없이 보여 줘요.')
+    if llm.backend() is None:
+        st.info(llm.SETUP_HELP)
     else:
-        apply_ai(table)
+        with st.spinner('AI가 모르는 컬럼을 살펴보는 중... (내 컴퓨터 AI는 몇 분 걸릴 수 있어요)'):
+            apply_ai(table)
 
 h1, h2 = st.columns([4, 1], vertical_alignment='bottom')
 h1.header(file.name)
@@ -121,15 +123,16 @@ if unknown or my_terms:
     topic = t1.text_input('데이터 주제를 적으면 AI가 모르는 단어 뜻을 먼저 채워 줘요',
                           placeholder='예: 야구 투구 기록, 쇼핑몰 주문')
     if t2.button('AI로 1차 채우기', disabled=not (topic and unknown), width='stretch',
-                 help='주제, 단어가 들어간 컬럼 이름, 샘플 값 3개가 Claude로 전송돼요. ANTHROPIC_API_KEY 필요.'):
-        import llm
+                 help='주제, 단어가 들어간 컬럼 이름, 샘플 값 3개를 AI에게 보내요 (Ollama면 내 컴퓨터 밖으로 안 나가요).'):
         words = [{'word': w,
                   'columns': [r['원래 이름'] for r in table if f"'{w}' 모름" in r['참고']],
                   'examples': next(r['샘플 값'] for r in table if f"'{w}' 모름" in r['참고']).split(', ')}
                  for w in unknown]
         with st.spinner('AI가 단어 뜻을 추측하는 중...'):
             guesses, err = llm.suggest_terms(topic, words)
-        if err:
+        if err == llm.NO_AI:
+            st.info(llm.SETUP_HELP)
+        elif err:
             st.warning(f'AI 추천 실패: {err}')
         if guesses:
             drafts.update(guesses)  # 초안만 넣고, 반영은 사용자가 창에서 확인을 눌러야 함

@@ -69,10 +69,12 @@ def check():
     llm.merge(cache, todo, '{"columns": [{"column": "st", "name": "주문 상태", "desc": "완료/환불"},'
                            ' {"column": "안보낸열", "name": "x", "desc": "x"}]}')
     assert list(cache.values()) == [['주문 상태', '완료/환불']]
-    old = os.environ.pop('ANTHROPIC_API_KEY', None)
-    assert llm.suggest_terms('테스트', [{'word': 'x', 'columns': ['x'], 'examples': []}])[1]  # 키 없으면 이유를 돌려줌
-    if old:
-        os.environ['ANTHROPIC_API_KEY'] = old
+    cache = {}
+    llm.merge(cache, todo, '{"columns": [{"column": "주문 상태", "name": "st", "desc": "d"}]}')  # 칸이 바뀐 답
+    assert list(cache.values()) == [['주문 상태', 'd']]
+    real_backend, llm.backend = llm.backend, lambda: None  # AI가 없는 컴퓨터인 척
+    assert llm.suggest_terms('테스트', [{'word': 'x', 'columns': ['x'], 'examples': []}]) == ({}, llm.NO_AI)
+    llm.backend = real_backend
 
     # 1단계: 컬럼 역할 — 정답을 아는 작은 판매 데이터
     from analyze import role

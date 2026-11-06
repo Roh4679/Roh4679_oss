@@ -47,17 +47,28 @@ python main.py --check                        # 자체 점검 (화면 없이 기
 
 ### AI 기능 (선택)
 
-사전으로 풀리지 않는 컬럼을 Claude AI에게 물어볼 수 있습니다. 쓰지 않아도 나머지 기능은 모두 동작합니다.
+사전으로 풀리지 않는 컬럼을 AI에게 물어볼 수 있습니다. **AI가 없어도 나머지 기능은 모두 동작합니다.**
+AI가 준비되지 않은 상태에서 AI 기능을 누르면 화면에 준비 방법이 나옵니다.
 
-- 환경변수 `ANTHROPIC_API_KEY`에 API 키를 넣어야 합니다. 키는 코드나 저장소에 넣지 마세요.
+둘 중 하나를 준비하세요. 둘 다 있으면 Claude를 씁니다.
+
+| | Ollama (추천) | Claude API |
+|---|---|---|
+| 비용 | 무료 | 사용량만큼 유료 |
+| 데이터 | 내 컴퓨터 밖으로 안 나감 | Anthropic 서버로 전송 |
+| 품질·속도 | 작은 모델이라 틀린 추측이 많고, 그래픽카드가 없으면 수십 초~몇 분 | 더 정확하고 빠름 |
+| 준비 | [Ollama 설치](https://ollama.com/download) 후 `ollama pull gemma3:4b` (약 3GB) | 환경변수 `ANTHROPIC_API_KEY`에 키 설정 (키는 코드나 저장소에 넣지 마세요) |
+
+- 다른 Ollama 모델을 쓰려면 환경변수 `OLLAMA_MODEL`에 모델 이름을 넣습니다.
 - 보내는 내용: 컬럼 이름, 값 요약, 샘플 값 3개 (명령창에서 `--no-samples`를 주면 샘플 값은 보내지 않음)
-- 같은 질문은 `.cache/`에 저장해 다시 보내지 않습니다 (비용 절약)
+- 같은 질문은 `.cache/`에 저장해 다시 묻지 않습니다
+- AI 답은 모두 "추측·AI"로 표시됩니다. 꼭 확인하고 고쳐 쓰세요.
 
 ```
 python main.py 데이터.csv --llm
 ```
 
-웹에서는 왼쪽의 "모르는 컬럼은 Claude AI에게 물어보기"를 켜거나, "AI로 1차 채우기"를 누릅니다.
+웹에서는 왼쪽의 "모르는 컬럼은 AI에게 물어보기"를 켜거나, "AI로 1차 채우기"를 누릅니다.
 
 ## 파일 구성
 
@@ -69,7 +80,7 @@ python main.py 데이터.csv --llm
 | `summary.py` | 파일 읽기(샘플링), 값 통계와 설명 |
 | `dictionary.py` | 컬럼 이름 → 한글 이름 |
 | `db.py` | SQLite 저장 (datasets, columns, terms 표) |
-| `llm.py` | Claude AI 연결 (선택) |
+| `llm.py` | AI 연결: Ollama 또는 Claude (선택) |
 | `terms/` | 분야 용어 파일 예시 |
 
 ## 데이터 보호
@@ -83,6 +94,8 @@ python main.py 데이터.csv --llm
 - [Streamlit](https://github.com/streamlit/streamlit) — 웹 화면 (Apache License 2.0)
 - [pandas](https://github.com/pandas-dev/pandas) — 웹 화면의 표·그래프용 데이터 (BSD 3-Clause, Streamlit과 함께 설치됨)
 - [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python) — Claude AI 연결 (MIT License), [Claude API 문서](https://docs.claude.com)
+- [Ollama](https://github.com/ollama/ollama) — 내 컴퓨터에서 AI 모델 실행 (MIT License), [API 문서](https://github.com/ollama/ollama/blob/main/docs/api.md)를 보고 Python 기본 모듈 `urllib`로 연결
+- [Gemma 3](https://ai.google.dev/gemma) — Ollama 기본 모델 `gemma3:4b` ([Gemma Terms of Use](https://ai.google.dev/gemma/terms)), 저장소에는 포함하지 않음
 - [SQLite](https://www.sqlite.org) — 저장소 (Public Domain), Python 기본 모듈 [`sqlite3`](https://docs.python.org/3/library/sqlite3.html)로 사용
 - Python 표준 라이브러리 [`csv`](https://docs.python.org/3/library/csv.html), [`random`](https://docs.python.org/3/library/random.html), [`datetime`](https://docs.python.org/3/library/datetime.html)
 - 저수지 샘플링(큰 파일에서 무작위 줄 뽑기): Jeffrey S. Vitter, "Random Sampling with a Reservoir", *ACM Transactions on Mathematical Software*, 11(1), 1985. ([위키백과 설명](https://en.wikipedia.org/wiki/Reservoir_sampling))
