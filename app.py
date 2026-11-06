@@ -1,5 +1,5 @@
 """웹 화면. 실행: python -m streamlit run app.py --server.address localhost
-화면 코드만 여기 두고, 분석은 dictionary.py / summary.py / llm.py 를 가져다 쓴다."""
+화면 코드만 여기 두고, 분석은 analyze.py, 저장은 db.py 를 가져다 쓴다."""
 import os
 import re
 import tempfile
@@ -7,42 +7,50 @@ import tempfile
 import pandas as pd
 import streamlit as st
 
-from dictionary import TERMS, korean_name
-from summary import describe, read_sample
+import db
+from analyze import apply_ai, dictionary_rows, profile
+from dictionary import TERMS
 
 
 @st.cache_data
 def analyze(data, k=50000):
-    """업로드한 파일(바이트) → (전체 줄 수, 샘플 표, 컬럼별 통계). 같은 파일은 다시 계산하지 않는다."""
+    """업로드한 파일(바이트) → (전체 줄 수, 샘플 표, 컬럼별 통계+역할). 같은 파일은 다시 계산하지 않는다."""
     with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as f:
         f.write(data)
     try:
-        header, rows, total = read_sample(f.name, k)
+        header, rows, total, infos = profile(f.name, k)
     finally:
         os.remove(f.name)
-    cols = list(zip(*rows)) if rows else [()] * len(header)
-    return total, pd.DataFrame(rows, columns=header), [describe(list(c)) for c in cols]
-
-
-def dictionary_table(header, infos):
-    """한글 이름은 캐시 밖에서 만든다 — 사용자가 단어 뜻을 넣으면 바로 반영되도록."""
-    table = []
-    for h, info in zip(header, infos):
-        name, sure, notes = korean_name(h)
-        table.append({'원래 이름': h, '한글 이름': name, '확실/추측': '확실' if sure else '추측',
-                      '설명': info['desc'], '종류': info['kind'], '빈칸 비율(%)': round(info['blank_pct'], 1),
-                      '샘플 값': ', '.join(info['examples']), '참고': '; '.join(notes)})
-    return table
+    return total, pd.DataFrame(rows, columns=header), infos
 
 
 st.set_page_config(page_title='데이터 이해 도우미', layout='wide')
+con = st.cache_resource(db.connect)()
+BASE_TERMS = st.cache_resource(lambda: dict(TERMS))()  # 기본 사전 원본 (사용자 단어를 지웠을 때 되돌리려고)
 
 with st.sidebar:
     st.title('데이터 이해 도우미')
     files = st.file_uploader('CSV 파일 올리기 (여러 개 가능)', type='csv', accept_multiple_files=True)
-    menu = st.radio('메뉴', ['컬럼 이해하기', '관계 파악하기 (준비 중)'])
+    menu = st.radio('메뉴', ['컬럼 이해하기', '저장 기록', '관계 파악하기 (준비 중)'])
     use_llm = st.checkbox('모르는 컬럼은 Claude AI에게 물어보기', value=False,
                           help='환경변수 ANTHROPIC_API_KEY가 필요해요. 컬럼 이름과 샘플 값 3개가 전송돼요.')
+
+if menu == '저장 기록':
+    st.header('저장 기록 (SQLite)')
+    saved = db.list_datasets(con)
+    if not saved:
+        st.info("아직 저장한 기록이 없어요. '컬럼 이해하기'에서 DB에 저장을 눌러 보세요.")
+        st.stop()
+    st.dataframe(pd.DataFrame(saved).rename(columns={
+        'id': '번호', 'file_name': '파일 이름', 'uploaded_at': '저장 시각',
+        'row_count': '줄 수', 'col_count': '열 수', 'sample_count': '샘플 줄 수'}), hide_index=True)
+    pick = st.selectbox('자세히 볼 기록', saved, format_func=lambda d: f"{d['id']}번 · {d['file_name']} · {d['uploaded_at']}")
+    st.dataframe(pd.DataFrame(db.get_columns(con, pick['id'])).drop(columns=['id', 'dataset_id']),
+                 hide_index=True, width='stretch')
+    if st.button(f"{pick['id']}번 기록 지우기"):
+        db.delete_dataset(con, pick['id'])
+        st.rerun()
+    st.stop()
 
 if not files:
     st.info('왼쪽에서 CSV 파일을 올려 주세요.')
@@ -56,27 +64,25 @@ file = files[0] if len(files) == 1 else st.selectbox('볼 파일', files, format
 with st.spinner('분석 중...'):
     total, sample, infos = analyze(file.getvalue())
 
-# 사용자가 넣은 단어 뜻 (이 브라우저 창에서만 유지, 새로고침하면 사라짐)
-my_terms = st.session_state.setdefault('my_terms', {})
-# ponytail: 공용 사전(TERMS)에 직접 덮어씀 — 혼자 쓰는 로컬 도구라 괜찮음. 여러 명이 쓰면 사용자별 사전으로 분리.
-TERMS.update(my_terms)
-table = dictionary_table(sample.columns, infos)
+# 사용자가 넣은 단어 뜻 — DB(terms 표)에 저장돼서 새로고침해도 남는다
+if 'my_terms' not in st.session_state:
+    st.session_state.my_terms = db.load_terms(con)
+my_terms = st.session_state.my_terms
+# ponytail: 공용 사전(TERMS)을 직접 바꿈 — 혼자 쓰는 로컬 도구라 괜찮음. 여러 명이 쓰면 사용자별 사전으로 분리.
+TERMS.clear()
+TERMS.update(BASE_TERMS, **my_terms)
+table = dictionary_rows(sample.columns, infos)
 
 if use_llm:
     if not os.environ.get('ANTHROPIC_API_KEY'):
         st.warning('ANTHROPIC_API_KEY가 없어 AI 없이 보여 줘요.')
     else:
-        import llm
-        guesses = [r for r in table if r['확실/추측'] == '추측']
-        ai = llm.suggest([{'column': r['원래 이름'], 'kind': r['종류'], 'desc': r['설명'],
-                           'examples': r['샘플 값'].split(', ') if r['샘플 값'] else []} for r in guesses])
-        for r in table:
-            if r['원래 이름'] in ai:
-                r['한글 이름'], ai_desc = ai[r['원래 이름']]
-                r['확실/추측'] = '추측·AI'
-                r['참고'] = f'AI 설명: {ai_desc}'
+        apply_ai(table)
 
-st.header(file.name)
+h1, h2 = st.columns([4, 1], vertical_alignment='bottom')
+h1.header(file.name)
+if h2.button('DB에 저장', width='stretch', help='지금 보이는 분석 결과를 기록으로 남겨요. 같은 파일도 저장할 때마다 새 기록으로 쌓여요.'):
+    st.toast(f'{db.save_dataset(con, file.name, total, len(sample), table)}번 기록으로 저장했어요.')
 a, b, c = st.columns(3)
 a.metric('줄 수', f'{total:,}')
 b.metric('열 수', len(table))
@@ -85,7 +91,7 @@ if len(sample) < total:
     st.caption(f'통계는 무작위로 뽑은 {len(sample):,}줄 기준이에요.')
 
 st.subheader('한글 컬럼 사전')
-st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
+st.dataframe(pd.DataFrame(table), hide_index=True, width='stretch')
 
 unknown = list(dict.fromkeys(w for r in table for w in re.findall(r"'([^']+)' 모름", r['참고'])))
 drafts = st.session_state.setdefault('drafts', {})  # AI가 채운 초안 (확인 전)
@@ -105,6 +111,7 @@ def fill_words():
                     my_terms[w] = means if len(means) > 1 else means[0]
                 else:
                     my_terms.pop(w, None)  # 칸을 비우면 넣은 뜻을 지움
+            db.save_terms(con, my_terms)
             drafts.clear()
             st.rerun()
 
@@ -113,7 +120,7 @@ if unknown or my_terms:
     t1, t2 = st.columns([4, 1], vertical_alignment='bottom')
     topic = t1.text_input('데이터 주제를 적으면 AI가 모르는 단어 뜻을 먼저 채워 줘요',
                           placeholder='예: 야구 투구 기록, 쇼핑몰 주문')
-    if t2.button('AI로 1차 채우기', disabled=not (topic and unknown), use_container_width=True,
+    if t2.button('AI로 1차 채우기', disabled=not (topic and unknown), width='stretch',
                  help='주제, 단어가 들어간 컬럼 이름, 샘플 값 3개가 Claude로 전송돼요. ANTHROPIC_API_KEY 필요.'):
         import llm
         words = [{'word': w,
@@ -131,7 +138,7 @@ if unknown or my_terms:
         fill_words()
 
 st.subheader('데이터 미리보기 (앞 100줄)')
-st.dataframe(sample.head(100), use_container_width=True)
+st.dataframe(sample.head(100), width='stretch')
 
 st.subheader('값 분포')
 col = st.selectbox('볼 컬럼', sample.columns,
