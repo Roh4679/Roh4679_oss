@@ -46,13 +46,15 @@ def profile(path, k=50000):
     return header, rows, total, infos
 
 
-def dictionary_rows(header, infos):
-    """한글 컬럼 사전 표의 줄들. 사용자가 넣은 단어 뜻이 바로 반영되도록 캐시 밖에서 부른다."""
+def dictionary_rows(header, infos, roles=None):
+    """한글 컬럼 사전 표의 줄들. 사용자가 넣은 단어 뜻·역할이 바로 반영되도록 캐시 밖에서 부른다.
+    roles: 사용자가 직접 고친 {컬럼 이름: 역할} — 자동 판단보다 우선하고 '?'가 붙지 않는다."""
+    roles = roles or {}
     table = []
     for h, info in zip(header, infos):
         name, sure, notes = korean_name(h)
         table.append({'원래 이름': h, '한글 이름': name, '확실/추측': '확실' if sure else '추측',
-                      '역할': ROLES[info['role']] + ('' if info['role_sure'] else ' ?'),
+                      '역할': ROLES[roles[h]] if h in roles else ROLES[info['role']] + ('' if info['role_sure'] else ' ?'),
                       '설명': info['desc'], '종류': info['kind'], '빈칸 비율(%)': round(info['blank_pct'], 1),
                       '샘플 값': ', '.join(info['examples']), '참고': '; '.join(notes)})
     return table

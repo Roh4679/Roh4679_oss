@@ -28,9 +28,19 @@ CREATE TABLE IF NOT EXISTS columns (
     examples    TEXT    NOT NULL,
     UNIQUE (dataset_id, position)
 );
+-- 사용자가 넣은 단어 뜻과 직접 고친 역할은 주제(예: 야구, 쇼핑몰)별로 따로 둔다.
+-- 같은 단어도 분야마다 뜻이 달라서 (home = 홈 플레이트 / 집), 한 주제에서 넣은 뜻이 다른 데이터에 섞이지 않게.
 CREATE TABLE IF NOT EXISTS terms (
-    word    TEXT PRIMARY KEY,
-    meaning TEXT NOT NULL  -- 뜻이 여러 개면 '|'로 이어 붙임
+    topic   TEXT NOT NULL,
+    word    TEXT NOT NULL,
+    meaning TEXT NOT NULL,  -- 뜻이 여러 개면 '|'로 이어 붙임
+    PRIMARY KEY (topic, word)
+);
+CREATE TABLE IF NOT EXISTS roles (
+    topic       TEXT NOT NULL,  -- '' = 주제 없음
+    column_name TEXT NOT NULL,
+    role        TEXT NOT NULL CHECK (role IN ('id', 'time', 'dimension', 'measure')),
+    PRIMARY KEY (topic, column_name)
 );
 """
 
@@ -69,18 +79,37 @@ def delete_dataset(con, dataset_id):
         con.execute('DELETE FROM datasets WHERE id = ?', (dataset_id,))  # 컬럼은 ON DELETE CASCADE로 같이 지워짐
 
 
-def load_terms(con):
-    """{단어: 뜻 또는 (뜻1, 뜻2)} — dictionary.TERMS와 같은 모양."""
+def list_topics(con):
+    """단어 뜻이나 역할을 저장한 적 있는 주제들."""
+    return [t for (t,) in con.execute("SELECT topic FROM terms UNION SELECT topic FROM roles WHERE topic != '' ORDER BY 1")]
+
+
+def load_terms(con, topic):
+    """그 주제의 {단어: 뜻 또는 (뜻1, 뜻2)} — dictionary.TERMS와 같은 모양."""
     out = {}
-    for word, meaning in con.execute('SELECT word, meaning FROM terms'):
+    for word, meaning in con.execute('SELECT word, meaning FROM terms WHERE topic = ?', (topic,)):
         means = tuple(meaning.split('|'))
         out[word] = means if len(means) > 1 else means[0]
     return out
 
 
-def save_terms(con, terms):
-    """사용자 단어 뜻 전체를 저장 (빠진 단어는 지움)."""
+def save_terms(con, topic, terms):
+    """그 주제의 단어 뜻 전체를 저장 (빠진 단어는 지움). 다른 주제는 건드리지 않는다."""
     with con:
-        con.execute('DELETE FROM terms')
-        con.executemany('INSERT INTO terms VALUES (?, ?)',
-                        [(w, '|'.join(m) if isinstance(m, tuple) else m) for w, m in terms.items()])
+        con.execute('DELETE FROM terms WHERE topic = ?', (topic,))
+        con.executemany('INSERT INTO terms VALUES (?, ?, ?)',
+                        [(topic, w, '|'.join(m) if isinstance(m, tuple) else m) for w, m in terms.items()])
+
+
+def load_roles(con, topic):
+    """그 주제에서 사용자가 직접 고친 {컬럼 이름: 역할}."""
+    return dict(con.execute('SELECT column_name, role FROM roles WHERE topic = ?', (topic,)).fetchall())
+
+
+def save_role(con, topic, column_name, role):
+    """역할 저장. role이 None이면 지워서 자동 판단으로 되돌린다."""
+    with con:
+        if role is None:
+            con.execute('DELETE FROM roles WHERE topic = ? AND column_name = ?', (topic, column_name))
+        else:
+            con.execute('INSERT OR REPLACE INTO roles VALUES (?, ?, ?)', (topic, column_name, role))

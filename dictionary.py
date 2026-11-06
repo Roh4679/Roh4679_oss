@@ -29,6 +29,18 @@ TERMS = {
 }
 
 
+def clean_meaning(text):
+    """입력한 뜻 정리 → 뜻 하나(str), 여러 개(tuple), 없으면 None.
+    쉼표나 '|'는 '뜻이 여러 개'로 보고, 괄호 속 설명과 ' - ' 뒤 설명은 잘라 짧은 이름만 남긴다.
+    예: '상위 (주문) - 공격할 팀' → '상위', '경기, 게임' → ('경기', '게임')"""
+    parts = []
+    for p in re.split(r'[|,]', text):
+        p = re.sub(r'\([^)]*\)', '', p).split(' - ')[0].strip()
+        if p and p not in parts:
+            parts.append(p)
+    return tuple(parts) if len(parts) > 1 else parts[0] if parts else None
+
+
 def load_terms(path):
     """분야 용어 파일(약어,한글)을 읽어 기본 사전 위에 덮어쓴다."""
     with open(path, encoding='utf-8-sig', newline='') as f:

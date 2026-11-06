@@ -100,8 +100,31 @@ def check():
     assert [c['name'] for c in cols] == header and cols[0]['role'] == '식별'
     db.delete_dataset(con, a)
     assert db.get_columns(con, a) == [] and len(db.list_datasets(con)) == 1  # 컬럼도 같이 지워짐
-    db.save_terms(con, {'pitcher': '투수', 'li': ('목록', '레버리지 지수')})
-    assert db.load_terms(con) == {'pitcher': '투수', 'li': ('목록', '레버리지 지수')}
+    # v0.2: 사용자가 고친 역할이 자동 판단보다 우선, 지우면 자동으로 돌아감
+    db.save_role(con, '매점', 'grade', 'measure')
+    assert dictionary_rows(header, infos, db.load_roles(con, '매점'))[2]['역할'] == '수치'
+    assert dictionary_rows(header, infos, db.load_roles(con, '학교'))[2]['역할'] == '분류 ?'  # 다른 주제엔 안 섞임
+    db.save_role(con, '매점', 'grade', None)
+    assert dictionary_rows(header, infos, db.load_roles(con, '매점'))[2]['역할'] == '분류 ?'
+    # v0.2: 지표 초안 + SQLite 계산 (정답: 매출 2*1000 + 1*1500 + 1*500 + 1*300 = 4300)
+    import metrics
+    import pandas as pd
+    drafts = {m['name']: m for m in metrics.draft(table)}
+    assert drafts['매출(수량×단가)']['formula'] == 'SUM("qty" * "price")' and not drafts['매출(수량×단가)']['sure']
+    assert '단가 합계' not in drafts and '단가 평균' in drafts  # 단가는 더하면 의미 없음
+    mem = metrics.load(pd.DataFrame(rows, columns=header), table)
+    assert metrics.evaluate(mem, drafts['매출(수량×단가)']['formula']) == (4300, None)
+    assert metrics.evaluate(mem, drafts['주문 수']['formula']) == (4, None)
+    assert metrics.evaluate(mem, 'SUM(없는열)')[1].startswith('없는 컬럼')
+    assert metrics.evaluate(mem, '1; DROP TABLE data')[1]
+    db.save_terms(con, '야구', {'pitcher': '투수', 'li': ('목록', '레버리지 지수')})
+    db.save_terms(con, '부동산', {'home': '집'})
+    assert db.load_terms(con, '야구') == {'pitcher': '투수', 'li': ('목록', '레버리지 지수')}
+    assert db.load_terms(con, '부동산') == {'home': '집'} and db.list_topics(con) == ['부동산', '야구']
+    # 뜻 정리: 쉼표 = 뜻 여러 개, 괄호·' - ' 뒤 설명은 잘라냄
+    from dictionary import clean_meaning
+    assert clean_meaning('상위 (주문) - 공격할 팀') == '상위'
+    assert clean_meaning('경기, 게임') == ('경기', '게임') and clean_meaning(' | ') is None
     print('ok')
 
 
