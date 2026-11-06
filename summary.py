@@ -33,10 +33,11 @@ def describe(values):
     filled = [v for v in values if v.strip()]
     info = {'blank_pct': 100 * (1 - len(filled) / len(values)) if values else 0.0,
             'kind': '글자', 'examples': list(dict.fromkeys(filled))[:3]}
+    uniq = set(filled)
+    info['n_filled'], info['n_unique'] = len(filled), len(uniq)
     if not filled:
         info['desc'] = '샘플에서 전부 빈칸'
         return info
-    uniq = set(filled)
     # 값 종류가 적고, 같은 값이 평균 두 번 이상 나와야 범주로 본다 (작은 데이터에서 전부 범주가 되는 것 방지)
     few = len(uniq) <= 20 and len(uniq) <= len(filled) / 2
     nums = [to_num(v) for v in filled]
